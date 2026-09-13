@@ -32,6 +32,7 @@ python import_trades.py --from 2026-09-01 --to 2026-09-08
 python import_trades.py --date 2026-09-08 --dry-run
 python import_trades.py --date 2026-09-08 --reconstruct-balance
 python import_trades.py --date 2026-09-08 --skip-volatility
+python import_trades.py --date 2026-09-08 --import-balance-ops
 ```
 
 - `--date` and `--from`/`--to` are mutually exclusive; one is required.
@@ -42,6 +43,22 @@ python import_trades.py --date 2026-09-08 --skip-volatility
   tagged with `externalId = <MT5 position_id>`, and `tm-server` dedupes on
   that server-side (`TradeRepository.findByExternalIdIn`) before creating
   anything -- so nothing gets double-booked.
+- `--import-balance-ops` also imports deposit/withdrawal operations (MT5's
+  `DEAL_TYPE_BALANCE` deals) as `Capital` rows, so the app's capital-over-time
+  chart on the Dashboard reflects your real broker history instead of only
+  manually-entered deposits/withdrawals. A trade's own PROFIT/LOSS is
+  **always** booked automatically by `tm-server` the moment the trade itself
+  is imported -- this flag is only about the deposit/withdrawal side, which
+  otherwise has to be entered by hand in the app. Safe to re-run for the same
+  reason as trades: each row is tagged `externalId = <MT5 deal ticket>` and
+  deduped server-side (`CapitalRepository.findByExternalIdIn`).
+  **Caveat:** if you've already manually logged some of these same
+  real-world deposits/withdrawals in the app before turning this flag on,
+  running it for a date range that covers them WILL double-book those
+  specific ones -- a manual entry has no `externalId` to dedupe against.
+  Either start using `--import-balance-ops` from a date going forward (and
+  keep your pre-existing manual entries as-is), or delete the manual ones
+  you're about to re-import from MT5 first.
 
 ## What gets filled in, and by what
 
@@ -96,3 +113,9 @@ The raw structure list is also sent to the server as `detectedStructures` (JSON 
   printed payloads against a handful of trades you know the outcome of, and
   ideally test against a demo account before trusting it against your real
   account history.
+- **`--import-balance-ops` only pulls raw balance operations, never a
+  trade's P&L.** It filters strictly to `DEAL_TYPE_BALANCE` deals and
+  ignores `DEAL_TYPE_BUY`/`DEAL_TYPE_SELL` ones -- those are already booked
+  as PROFIT/LOSS `Capital` rows by `tm-server`'s `TradeService.create()` the
+  moment the trade itself is imported. Don't add trade P&L handling to this
+  path; it would double it.

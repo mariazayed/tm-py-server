@@ -22,7 +22,7 @@ import unittest
 from datetime import datetime, timezone
 
 import import_trades as it
-from mt5_source import ClosedPosition
+from mt5_source import BalanceOperation, ClosedPosition
 
 
 def _sample_position(**overrides) -> ClosedPosition:
@@ -146,6 +146,73 @@ class BuildTradePayloadTest(unittest.TestCase):
 
         self.assertEqual(first, second)
         self.assertEqual(first["externalId"], str(position.position_id))
+
+
+class BuildCapitalPayloadTest(unittest.TestCase):
+    """Exercises import_trades.build_capital_payload() -- the pure function
+    that turns one MT5 balance-operation deal into the exact JSON body sent
+    to POST /api/v1/capital. Same "genuinely executable, no MT5 terminal
+    needed" property as BuildTradePayloadTest above."""
+
+    def test_positive_amount_maps_to_deposit_with_positive_magnitude(self):
+        op = BalanceOperation(
+            ticket=555, time=datetime(2026, 9, 1, 8, 30, tzinfo=timezone.utc),
+            amount=500.0, comment="Deposit",
+        )
+        payload = it.build_capital_payload(op)
+        self.assertEqual(payload["reason"], it.CAPITAL_REASON_DEPOSIT)
+        self.assertEqual(payload["amount"], 500.0)
+        self.assertEqual(payload["externalId"], "555")
+        self.assertEqual(payload["notes"], "Deposit")
+
+    def test_negative_amount_maps_to_withdraw_with_positive_magnitude(self):
+        # NewCapitalRequest.amount is a positive magnitude with `reason`
+        # carrying the direction (unlike PROFIT/LOSS, which is signed) --
+        # see tm_dashboard's CapitalDashboardHelper.capitalOverTime(), the
+        # one place that negates WITHDRAW. A raw MT5 withdrawal deal has a
+        # *negative* `profit`, so this must flip to a positive amount here.
+        op = BalanceOperation(
+            ticket=556, time=datetime(2026, 9, 1, 9, 0, tzinfo=timezone.utc),
+            amount=-200.0, comment="Withdrawal",
+        )
+        payload = it.build_capital_payload(op)
+        self.assertEqual(payload["reason"], it.CAPITAL_REASON_WITHDRAW)
+        self.assertEqual(payload["amount"], 200.0)
+
+    def test_date_format_is_space_separated_not_iso(self):
+        # NewCapitalRequest.dateTime declares a custom @JsonFormat
+        # ("yyyy-MM-dd HH:mm:ss", no 'T') -- different from NewTradeRequest's
+        # plain ISO LocalDateTime fields. Sending .isoformat() here would
+        # send the wrong wire format and fail server-side deserialization.
+        op = BalanceOperation(
+            ticket=1, time=datetime(2026, 9, 8, 10, 5, 30, tzinfo=timezone.utc),
+            amount=100.0, comment="",
+        )
+        payload = it.build_capital_payload(op)
+        self.assertEqual(payload["dateTime"], "2026-09-08 10:05:30")
+        self.assertNotIn("T", payload["dateTime"])
+
+    def test_empty_comment_becomes_none_not_empty_string(self):
+        op = BalanceOperation(
+            ticket=2, time=datetime(2026, 9, 8, tzinfo=timezone.utc),
+            amount=100.0, comment="",
+        )
+        payload = it.build_capital_payload(op)
+        self.assertIsNone(payload["notes"])
+
+    def test_idempotent_rebuild_produces_identical_payload(self):
+        # Same guarantee as trades: re-running an overlapping date range must
+        # build the exact same payload (in particular the same externalId)
+        # so the server's findByExternalIdIn dedupe (CapitalServiceTest,
+        # once added) actually catches it as a duplicate.
+        op = BalanceOperation(
+            ticket=999, time=datetime(2026, 9, 8, 12, 0, tzinfo=timezone.utc),
+            amount=-75.5, comment="Withdrawal completed",
+        )
+        first = it.build_capital_payload(op)
+        second = it.build_capital_payload(op)
+        self.assertEqual(first, second)
+        self.assertEqual(first["externalId"], str(op.ticket))
 
 
 if __name__ == "__main__":

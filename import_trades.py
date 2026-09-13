@@ -8,6 +8,7 @@ Usage:
     python import_trades.py --date 2026-09-08 --reconstruct-balance
     python import_trades.py --date 2026-09-08 --skip-volatility
     python import_trades.py --date 2026-09-08 --dry-run
+    python import_trades.py --date 2026-09-08 --import-balance-ops
 
 See README.md for the full explanation of what is/isn't computed here vs.
 by the server (TradeEnrichmentService), and for the documented gaps in
@@ -61,6 +62,13 @@ TP_PLACEMENT_REASON_TO_INT = {
 }
 MARKET_BIAS_TO_INT = {"BULLISH": 1, "BEARISH": 2, "NEUTRAL": 3}
 
+# CapitalReasonEnum's @JsonValue integers (tm-server/enums/CapitalReasonEnum.java).
+# Only DEPOSIT/WITHDRAW are ever sent from here -- PROFIT/LOSS is always
+# booked server-side by TradeService.create() the moment the trade itself is
+# imported, never by this importer directly.
+CAPITAL_REASON_DEPOSIT = 4
+CAPITAL_REASON_WITHDRAW = 3
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Import closed MT5 trades into TradeMind.")
@@ -75,6 +83,15 @@ def parse_args() -> argparse.Namespace:
                          help="Skip the ATR-based volatility classification (fewer MT5 calls, faster).")
     parser.add_argument("--dry-run", action="store_true",
                          help="Fetch and print what would be imported without calling the TradeMind API.")
+    parser.add_argument("--import-balance-ops", action="store_true",
+                         help="Also import deposit/withdrawal operations from MT5 (DEAL_TYPE_BALANCE "
+                              "deals) as Capital rows, so the app's capital-over-time chart reflects "
+                              "your real broker history instead of manually-entered deposits/"
+                              "withdrawals. Opt-in and safe to re-run (deduped by deal ticket via "
+                              "externalId) -- but if you've already manually logged some of these "
+                              "same real-world deposits/withdrawals in the app, running this for a "
+                              "date range that covers them WILL double-book those specific ones, "
+                              "since a manual entry has no externalId to dedupe against. See README.")
     args = parser.parse_args()
 
     if args.date_from and not args.date_to:
@@ -194,6 +211,30 @@ def build_trade_payload(position: mt5_source.ClosedPosition, asset_id: int,
     }
 
 
+def build_capital_payload(op: mt5_source.BalanceOperation) -> dict:
+    """Builds a NewCapitalRequest JSON payload for a raw MT5 balance
+    operation (deposit/withdrawal/credit). NewCapitalRequest.dateTime uses a
+    custom @JsonFormat ("yyyy-MM-dd HH:mm:ss", no 'T') that differs from
+    NewTradeRequest's plain ISO LocalDateTime fields -- don't reuse
+    .isoformat() here, it's the wrong wire format for this endpoint.
+
+    Amount is sent as a positive magnitude with `reason` carrying the
+    direction, matching how the TradeMind dashboard's own deposit/withdraw
+    dialog already sends it: WITHDRAW is NOT a signed/negative amount in
+    this API, unlike PROFIT/LOSS. (See tm_dashboard's
+    CapitalDashboardHelper.capitalOverTime(), the one place that negates
+    WITHDRAW when computing a running balance.)
+    """
+    reason = CAPITAL_REASON_DEPOSIT if op.amount >= 0 else CAPITAL_REASON_WITHDRAW
+    return {
+        "dateTime": op.time.replace(tzinfo=None).strftime("%Y-%m-%d %H:%M:%S"),
+        "amount": abs(op.amount),
+        "reason": reason,
+        "notes": op.comment or None,
+        "externalId": str(op.ticket),
+    }
+
+
 def main() -> None:
     args = parse_args()
     settings = config.load_settings()
@@ -206,8 +247,33 @@ def main() -> None:
     try:
         import MetaTrader5 as mt5
 
+        # Created up front (needs no MT5-specific setup) so --import-balance-ops
+        # can use it even on a day with no closed positions to trade-import.
+        client = TmApiClient(settings.tm_api_base_url, settings.tm_api_token)
+
         positions, deals_by_position = mt5_source.fetch_closed_positions(date_from, date_to)
         print(f"Found {len(positions)} closed position(s) in range.")
+
+        if args.import_balance_ops:
+            print("Fetching deposit/withdrawal balance operations...")
+            balance_ops = mt5_source.fetch_balance_operations(date_from, date_to)
+            capital_payloads = [build_capital_payload(op) for op in balance_ops]
+            print(f"Found {len(capital_payloads)} balance operation(s) in range.")
+
+            if args.dry_run:
+                print("\n--dry-run: the following capital rows would be sent to TradeMind "
+                      "(no API calls made):\n")
+                for payload in capital_payloads:
+                    print(payload)
+            elif capital_payloads:
+                print(f"Sending {len(capital_payloads)} balance operation(s) to TradeMind "
+                      f"as capital rows...")
+                created_capitals = client.create_capitals(capital_payloads)
+                imported_capitals = len(created_capitals)
+                print(f"Balance-ops summary: {len(capital_payloads)} found, "
+                      f"{imported_capitals} imported, "
+                      f"{len(capital_payloads) - imported_capitals} skipped as duplicates or failed.")
+
         if not positions:
             return
 
@@ -225,8 +291,6 @@ def main() -> None:
 
         symbols = {p.symbol for p in positions}
         symbol_infos = {s: mt5.symbol_info(s) for s in symbols}
-
-        client = TmApiClient(settings.tm_api_base_url, settings.tm_api_token)
 
         print(f"Resolving {len(symbols)} asset(s) against TradeMind...")
         assets_by_symbol = ensure_asset_ids(client, symbols)

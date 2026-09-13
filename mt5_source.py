@@ -355,6 +355,50 @@ def fetch_mae_mfe_and_volatility(positions: list[ClosedPosition], skip_volatilit
 
 
 # ---------------------------------------------------------------------------
+# Balance operations (deposits/withdrawals) for the Capital ledger
+# ---------------------------------------------------------------------------
+
+@dataclass
+class BalanceOperation:
+    ticket: int
+    time: datetime
+    # Raw MT5 sign convention: positive = money in (deposit/credit),
+    # negative = money out (withdrawal). Converted to TradeMind's own
+    # DEPOSIT/WITHDRAW + positive-magnitude convention in import_trades.py's
+    # build_capital_payload(), not here -- this module stays a thin,
+    # MT5-shaped read.
+    amount: float
+    comment: str
+
+
+def fetch_balance_operations(date_from: datetime, date_to: datetime) -> list[BalanceOperation]:
+    """Pulls raw deposit/withdrawal/credit operations in [date_from, date_to]
+    -- MT5 represents each one as a deal with type == DEAL_TYPE_BALANCE and
+    the signed amount in `profit`. Deliberately excludes trading deals
+    (DEAL_TYPE_BUY/SELL): a trade's P&L is already booked as its own
+    PROFIT/LOSS Capital row by tm-server's TradeService.create() the moment
+    the trade itself is imported, so pulling it again here would double it.
+    """
+    deals = mt5.history_deals_get(date_from, date_to)
+    if deals is None:
+        print(f"WARNING: history_deals_get returned None: {mt5.last_error()}", file=sys.stderr)
+        return []
+
+    operations = [
+        BalanceOperation(
+            ticket=deal.ticket,
+            time=datetime.fromtimestamp(deal.time, tz=timezone.utc),
+            amount=deal.profit,
+            comment=deal.comment or "",
+        )
+        for deal in deals
+        if deal.type == mt5.DEAL_TYPE_BALANCE
+    ]
+    operations.sort(key=lambda op: op.time)
+    return operations
+
+
+# ---------------------------------------------------------------------------
 # Opt-in account balance reconstruction (for accountBalanceAtEntry)
 # ---------------------------------------------------------------------------
 

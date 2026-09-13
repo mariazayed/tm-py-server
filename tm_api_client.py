@@ -91,6 +91,46 @@ class TmApiClient:
                 )
         return results
 
+    # -- Capital (deposits/withdrawals) ---------------------------------
+
+    def create_capitals(self, payloads: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """POST /capital takes a List<NewCapitalRequest> and returns a
+        matching List<CapitalResponse>. Same batch-then-individual-fallback
+        shape as create_trades, for the same reason -- one bad row (e.g. a
+        validation error) shouldn't sink every other balance operation in
+        the run."""
+        if not payloads:
+            return []
+
+        try:
+            resp = self._session.post(self._url("/capital"), json=payloads)
+            resp.raise_for_status()
+            return resp.json()
+        except requests.HTTPError as batch_error:
+            print(
+                f"WARNING: batch capital creation failed ({batch_error}); "
+                f"retrying {len(payloads)} capital row(s) individually so we "
+                f"can isolate the failure(s).",
+                file=sys.stderr,
+            )
+
+        results: list[dict[str, Any]] = []
+        for i, payload in enumerate(payloads):
+            try:
+                resp = self._session.post(self._url("/capital"), json=[payload])
+                resp.raise_for_status()
+                created = resp.json()
+                results.extend(created)
+            except requests.HTTPError as row_error:
+                external_id = payload.get("externalId", "?")
+                body = getattr(row_error.response, "text", "")
+                print(
+                    f"ERROR: failed to create capital row #{i} (externalId={external_id}): "
+                    f"{row_error} -- {body}",
+                    file=sys.stderr,
+                )
+        return results
+
     # -- Trade steps -------------------------------------------------------
 
     def create_trade_steps(self, payloads: list[dict[str, Any]]) -> list[dict[str, Any]]:
