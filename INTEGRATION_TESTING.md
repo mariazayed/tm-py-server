@@ -8,7 +8,7 @@ This is the part of Phase 7 that genuinely cannot be automated from a cloud sand
 
 - [ ] `pg_dump` your database. If anything here goes sideways, you want a clean restore point.
 - [ ] Confirm `tm-server` starts cleanly against that real database and Flyway applies all seven migrations (`V1`...`V7`) without error. This is the first time they've run against anything but the stub verification DB used during development.
-- [ ] Confirm `tm-py-server`'s `.env` is filled in (`MT5_LOGIN`/`PASSWORD`/`SERVER` or a running terminal already logged in, `TM_API_BASE_URL`, `TM_DEFAULT_STRATEGY_ID`).
+- [ ] Confirm `tm-py-server`'s `.env` is filled in (`MT5_LOGIN`/`PASSWORD`/`SERVER` or a running terminal already logged in, `TM_API_BASE_URL`).
 - [ ] Run the automated test suites for real, on your machine (both need network access to Maven Central / PyPI this sandbox doesn't have):
   - `tm-server`: `mvnw test` — should include `TradeEnrichmentServiceTest`, `AiSuggestionResponseParserTest`, `AiSuggestionServiceTest`, `TradeServiceTest`, `StaticDataTest`.
   - `tm-py-server`: `python3 -m unittest discover -v` — should include `test_structure_detection.py` (22 tests) and `test_import_trades.py` (7 tests).

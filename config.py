@@ -55,23 +55,11 @@ class Settings:
     tm_api_base_url: str
     tm_api_token: str | None
 
-    default_strategy_id: int
-
     account_history_start: date
 
 
 def load_settings() -> Settings:
     base_url = _get("TM_API_BASE_URL", "http://localhost:8080")
-    strategy_id = _get_int("TM_DEFAULT_STRATEGY_ID")
-
-    if strategy_id is None:
-        print(
-            "ERROR: TM_DEFAULT_STRATEGY_ID is not set in .env. "
-            "Every imported trade needs a strategyId -- set this to the id "
-            "of the strategy you want auto-imported trades filed under.",
-            file=sys.stderr,
-        )
-        sys.exit(1)
 
     return Settings(
         mt5_login=_get_int("MT5_LOGIN"),
@@ -80,6 +68,5 @@ def load_settings() -> Settings:
         mt5_terminal_path=_get("MT5_TERMINAL_PATH"),
         tm_api_base_url=base_url.rstrip("/"),
         tm_api_token=_get("TM_API_TOKEN"),
-        default_strategy_id=strategy_id,
         account_history_start=_get_date("ACCOUNT_HISTORY_START", "2020-01-01"),
     )

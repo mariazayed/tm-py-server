@@ -17,9 +17,6 @@ analysis fields as MT5's data actually supports.
      terminal instead.
    - `TM_API_BASE_URL` -- where `tm-server` is running (default
      `http://localhost:8080`).
-   - `TM_DEFAULT_STRATEGY_ID` -- **required**. Every trade needs a
-     `strategyId`; imported trades aren't auto-classified into a strategy,
-     so pick an id to file them under (re-assign later from the app).
    - `ACCOUNT_HISTORY_START` -- only used with `--reconstruct-balance`, see
      below.
 5. Make sure `tm-server` is actually running before you import.
