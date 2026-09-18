@@ -49,14 +49,13 @@ class BuildTradePayloadTest(unittest.TestCase):
             _sample_position(), asset_id=7,
             mae_mfe_vol={"mae": -5.0, "mfe": 12.0, "volatility": "HIGH"},
             balance_at_entry=10000.0,
-            pips=50.0,
             structure_fields={},
         )
         self.assertEqual(payload["asset"], 7)
         self.assertEqual(payload["direction"], 1)  # LONG -> TradeDirectionEnum.LONG
         self.assertEqual(payload["externalId"], "123456789")
         self.assertEqual(payload["source"], 2)  # TradeSourceEnum.AUTO_IMPORTED
-        self.assertEqual(payload["pips"], 50.0)
+        self.assertNotIn("pips", payload)
         self.assertEqual(payload["mae"], -5.0)
         self.assertEqual(payload["mfe"], 12.0)
         self.assertEqual(payload["volatility"], 3)  # VolatilityEnum.HIGH
@@ -67,7 +66,7 @@ class BuildTradePayloadTest(unittest.TestCase):
     def test_short_direction_maps_to_two(self):
         payload = it.build_trade_payload(
             _sample_position(direction="SHORT"), asset_id=1,
-            mae_mfe_vol={}, balance_at_entry=None, pips=-10.0, structure_fields={},
+            mae_mfe_vol={}, balance_at_entry=None, structure_fields={},
         )
         self.assertEqual(payload["direction"], 2)
 
@@ -83,7 +82,7 @@ class BuildTradePayloadTest(unittest.TestCase):
         }
         payload = it.build_trade_payload(
             _sample_position(), asset_id=1, mae_mfe_vol={}, balance_at_entry=None,
-            pips=50.0, structure_fields=structure_fields,
+            structure_fields=structure_fields,
         )
         self.assertEqual(payload["entryZoneType"], 1)
         self.assertEqual(payload["entryConfirmation"], 2)
@@ -99,7 +98,7 @@ class BuildTradePayloadTest(unittest.TestCase):
     def test_missing_structure_fields_are_null_not_keyerror(self):
         payload = it.build_trade_payload(
             _sample_position(), asset_id=1, mae_mfe_vol={}, balance_at_entry=None,
-            pips=0.0, structure_fields={},
+            structure_fields={},
         )
         for key in ("entryZoneType", "entryConfirmation", "exitReason",
                     "slPlacementReason", "tpPlacementReason", "marketBias",
@@ -107,15 +106,14 @@ class BuildTradePayloadTest(unittest.TestCase):
             self.assertIsNone(payload[key], f"{key} should be None, not missing/raise")
 
     def test_never_sends_server_computed_fields(self):
-        # TradeEnrichmentService always (re)computes these server-side --
-        # sending them from the importer would be pointless (and immediately
-        # overwritten), so build_trade_payload must never include them.
+        # TradeEnrichmentService owns these server-side fields, and the
+        # frontend owns pips. The importer must not send any of them.
         payload = it.build_trade_payload(
             _sample_position(), asset_id=1, mae_mfe_vol={}, balance_at_entry=None,
-            pips=0.0, structure_fields={},
+            structure_fields={},
         )
         for key in ("session", "dayOfWeek", "tradeType", "riskPercent",
-                    "plannedRiskReward", "rMultiple"):
+                    "plannedRiskReward", "rMultiple", "pips"):
             self.assertNotIn(key, payload)
 
     def test_llm_only_fields_are_never_set_by_importer(self):
@@ -125,7 +123,7 @@ class BuildTradePayloadTest(unittest.TestCase):
         # caller mistakenly stuffed one into structure_fields.
         payload = it.build_trade_payload(
             _sample_position(), asset_id=1, mae_mfe_vol={}, balance_at_entry=None,
-            pips=0.0, structure_fields={"entryReason": "BREAKOUT"},
+            structure_fields={"entryReason": "BREAKOUT"},
         )
         for key in ("entryReason", "marketState", "invalidationCondition", "probability"):
             self.assertNotIn(key, payload)
@@ -141,8 +139,8 @@ class BuildTradePayloadTest(unittest.TestCase):
         mae_mfe_vol = {"mae": -3.0, "mfe": 9.0, "volatility": "MEDIUM"}
         structure_fields = {"entryZoneType": "FVG", "marketBias": "BEARISH"}
 
-        first = it.build_trade_payload(position, 7, mae_mfe_vol, 10000.0, 42.0, structure_fields)
-        second = it.build_trade_payload(position, 7, mae_mfe_vol, 10000.0, 42.0, structure_fields)
+        first = it.build_trade_payload(position, 7, mae_mfe_vol, 10000.0, structure_fields)
+        second = it.build_trade_payload(position, 7, mae_mfe_vol, 10000.0, structure_fields)
 
         self.assertEqual(first, second)
         self.assertEqual(first["externalId"], str(position.position_id))

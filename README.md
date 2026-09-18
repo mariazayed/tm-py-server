@@ -64,7 +64,7 @@ python import_trades.py --date 2026-09-08 --import-balance-ops
 | entryDateTime / exitDateTime / entryPrice / exitPrice / lotSize / pnl | MT5 deal history (volume-weighted average price if the position was scaled) |
 | direction | MT5 deal type of the entry fill |
 | slPrice / tpPrice | Best-effort: the SL/TP recorded on the position's *original entry order*. MT5 does not log a history of manual SL/TP edits on an already-open position, so if you moved your stop mid-trade, this will NOT reflect that -- it's the SL/TP that was set when the trade was opened. |
-| pips | Computed from MT5 `symbol_info` (point size + digits, standard 10x adjustment for 3/5-digit brokers) |
+| pips | Not sent by the importer; frontend manual-entry pips come from the selected asset's `pipSize` |
 | mae / mfe | Computed from M1 price bars between entry and exit (see below) |
 | volatility | ATR(14) on M15 bars, bucketed into LOW/MEDIUM/HIGH against a 200-bar percentile distribution for that symbol. Skippable with `--skip-volatility`. |
 | accountBalanceAtEntry | Only with `--reconstruct-balance` (see caveat below); otherwise left blank |

@@ -117,17 +117,6 @@ def resolve_range(args: argparse.Namespace) -> tuple[datetime, datetime]:
     return start, end
 
 
-def compute_pips(symbol_info, entry_price: float, exit_price: float, direction: str) -> float:
-    """Standard pip-size convention: 1 pip = 10 points on 3- or 5-digit
-    brokers (fractional pip pricing), 1 pip = 1 point otherwise."""
-    digits = symbol_info.digits
-    pip_size = symbol_info.point * (10 if digits in (3, 5) else 1)
-    if pip_size == 0:
-        return 0.0
-    diff = exit_price - entry_price if direction == "LONG" else entry_price - exit_price
-    return diff / pip_size
-
-
 def ensure_asset_ids(client: TmApiClient, symbols: set[str]) -> dict[str, dict]:
     """Returns {symbol: assetResponseDict}. Creates any missing asset (using
     MT5's trade_contract_size), and backfills contractSize on any existing
@@ -160,7 +149,7 @@ def ensure_asset_ids(client: TmApiClient, symbols: set[str]) -> dict[str, dict]:
 
 def build_trade_payload(position: mt5_source.ClosedPosition, asset_id: int,
                          mae_mfe_vol: dict, balance_at_entry: Optional[float],
-                         pips: float, structure_fields: dict) -> dict:
+                         structure_fields: dict) -> dict:
     """Builds a NewTradeRequest JSON payload. Deliberately omits session,
     dayOfWeek, tradeType, riskPercent, plannedRiskReward and rMultiple --
     TradeEnrichmentService always (re)computes those server-side on create,
@@ -191,7 +180,6 @@ def build_trade_payload(position: mt5_source.ClosedPosition, asset_id: int,
         "tpPrice": position.tp_price or 0.0,
         "direction": DIRECTION_TO_INT[position.direction],
         "lotSize": position.volume,
-        "pips": pips,
         "pnl": position.pnl,
         "notes": None,
         "externalId": str(position.position_id),
@@ -289,20 +277,15 @@ def main() -> None:
             balances = mt5_source.reconstruct_balance_at_entry(positions, settings.account_history_start)
 
         symbols = {p.symbol for p in positions}
-        symbol_infos = {s: mt5.symbol_info(s) for s in symbols}
-
         print(f"Resolving {len(symbols)} asset(s) against TradeMind...")
         assets_by_symbol = ensure_asset_ids(client, symbols)
 
         trade_payloads = []
         for position in positions:
             asset = assets_by_symbol[position.symbol]
-            info = symbol_infos[position.symbol]
-            pips = compute_pips(info, position.entry_price, position.exit_price, position.direction) \
-                if info is not None else 0.0
             trade_payloads.append(build_trade_payload(
                 position, asset["id"], mae_mfe_vol.get(position.position_id, {}),
-                balances.get(position.position_id), pips,
+                balances.get(position.position_id),
                 structure_results.get(position.position_id, {}),
             ))
 

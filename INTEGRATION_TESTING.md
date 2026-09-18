@@ -22,7 +22,7 @@ python import_trades.py --date <a day you remember trading> --dry-run
 
 Don't skip this. Pick a day where you can remember roughly what happened. For each printed payload:
 - [ ] `direction`, `entryPrice`, `exitPrice`, `lotSize`, `pnl` match what MT5's own History tab shows for that position.
-- [ ] `pips` looks right for the symbol (watch for the 3/5-digit broker pip-size adjustment mentioned in the importer's README).
+- [ ] `pips` is absent from importer payloads; manual journal entries calculate pips in the frontend from the selected asset's `pipSize`.
 - [ ] `slPrice`/`tpPrice` match the *original entry order* — remember this is best-effort and won't reflect a stop you moved mid-trade (documented limitation, not a bug).
 - [ ] `externalId` is present and looks like a real MT5 position id.
 - [ ] `detectedStructures` is either `null` or a plausible-looking JSON structure list — spot check one against the actual chart for that symbol/time if you want real confidence in the structure detector.
